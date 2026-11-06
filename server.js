@@ -1,5 +1,6 @@
 const http=require('http'),fs=require('fs'),path=require('path');
-const {SETTINGS,CHARACTERS,ITEMS,EVENTS,nodes,adj,STAR_NODES,START}=require('./public/game-data.js');
+const DIR=fs.existsSync(path.join(__dirname,'public','game-data.js'))?path.join(__dirname,'public'):__dirname;
+const {SETTINGS,CHARACTERS,ITEMS,EVENTS,nodes,adj,STAR_NODES,START}=require(path.join(DIR,'game-data.js'));
 const rooms={},rnd=n=>Math.floor(Math.random()*n)+1,pick=a=>a[rnd(a.length)-1];
 const newGame=()=>({phase:'lobby',seats:[],turn:0,round:1,starAt:STAR_NODES[0],seq:0,trail:[],pending:null,roll:0,log:['Lobby open. Join and pick a character.']});
 const newSeat=(id,name,char)=>({id,name,char,coins:0,stars:0,items:[],pos:START,prev:null,bonus:0,dbl:false});
@@ -51,7 +52,8 @@ http.createServer((req,res)=>{const u=new URL(req.url,'http://x'),code=(u.search
   req.on('close',()=>{clearInterval(ping);r.cl.delete(c)});return}
  if(u.pathname==='/act'&&req.method==='POST'&&id){let b='';req.on('data',d=>{b+=d;if(b.length>2000)req.destroy()});
   req.on('end',()=>{let a;try{a=JSON.parse(b)}catch{res.writeHead(400);return res.end()}const r=room(code);let ok=false;try{ok=act(r.S,id,a)}catch(e){console.error(e)}if(ok)push(r);res.writeHead(ok?200:409);res.end()});return}
- let f=u.pathname==='/'?'/index.html':u.pathname;const fp=path.join(__dirname,'public',path.normalize(f));
- if(!fp.startsWith(path.join(__dirname,'public'))||!fs.existsSync(fp)||fs.statSync(fp).isDirectory()){res.writeHead(404);return res.end('Not found')}
+ const f=u.pathname==='/'?'index.html':u.pathname.slice(1);
+ if(!['index.html','game-data.js'].includes(f)){res.writeHead(404);return res.end('Not found')}
+ const fp=path.join(DIR,f);
  res.writeHead(200,{'Content-Type':MIME[path.extname(fp)]||'application/octet-stream'});fs.createReadStream(fp).pipe(res)
 }).listen(process.env.PORT||3000,()=>console.log('Party board running on port '+(process.env.PORT||3000)));

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Greedy Gala – Party Board</title>
+<style>
+:root{--bg:#14181f;--panel:#1e2430;--ink:#f2f4f8;--mut:#9aa6ba;--line:#323b4d;--acc:#ffd23f}
+@media(prefers-color-scheme:light){:root{--bg:#eef1f6;--panel:#fff;--ink:#1b2130;--mut:#5b6679;--line:#d3d9e4}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+#app{display:flex;flex-wrap:wrap;gap:12px;padding:12px;max-width:1400px;margin:auto}
+#boardWrap{flex:1 1 640px;min-width:0}#side{flex:1 1 300px;max-width:440px;display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+svg{width:100%;height:auto;border-radius:14px;background:#17402e;display:block}
+button{font:inherit;background:var(--acc);color:#1b2130;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer}
+button.alt{background:var(--line);color:var(--ink)}button:disabled{opacity:.4;cursor:default}
+input{font:inherit;padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);width:100%}
+.pl{display:flex;align-items:center;gap:8px;padding:6px;border-radius:8px;border:2px solid transparent}.pl.on{border-color:var(--acc)}.pl .em{font-size:26px}
+small{color:var(--mut)}.row{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);border-radius:8px;padding:4px 8px;background:transparent;color:var(--ink);font-weight:500}.chip.sel{outline:2px solid var(--acc)}.chip.taken{opacity:.35}
+#log{max-height:160px;overflow:auto;font-size:13px;color:var(--mut)}h1{font-size:18px;margin:0 0 4px}.big{font-size:20px;font-weight:700}.tok{transition:transform .28s}
+</style></head><body>
+<div id="app">
+ <div id="boardWrap"><svg id="svg" viewBox="0 0 1024 768"></svg></div>
+ <div id="side">
+  <div class="card"><h1>🎲 Greedy Gala</h1><div id="status" class="big">Connecting…</div><small id="inv"></small></div>
+  <div class="card" id="ctl"></div><div class="card" id="players"></div>
+  <div class="card"><b>Log</b><div id="log"></div></div>
+ </div></div>
+<script src="game-data.js"></script>
+<script>
+const {SETTINGS,CHARACTERS,ITEMS,nodes,adj}=GD;
+const room=(new URLSearchParams(location.search).get('room')||'main').replace(/[^\w-]/g,'').slice(0,24)||'main';
+let pid=localStorage.getItem('pid');if(!pid){pid=Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem('pid',pid)}
+let myName=localStorage.getItem('pname')||'',S=null,shown={},lastSeq=-1,ERR='';
+const $=id=>document.getElementById(id);
+const COL={blue:'#3a86ff',red:'#e63946',item:'#9b5de5',event:'#2ec4b6',start:'#ffd23f'},ICO={item:'🎁',event:'?',start:'🏁'};
+const tile=(x,y,e,c)=>`<rect x="${x-30}" y="${y-30}" width="60" height="60" rx="9" fill="${c}" stroke="#fff" stroke-width="3"/><text x="${x}" y="${y+11}" text-anchor="middle" font-size="32">${e}</text>`;
+const DECOR=['<circle cx="490" cy="440" r="66" fill="#3a1f1f" stroke="#c9a227" stroke-width="5"/>','<circle cx="703" cy="285" r="38" fill="none" stroke="#ffd23f" stroke-width="5"/><text x="703" y="297" text-anchor="middle" font-size="34">⭐</text>',
+ tile(960,210,'🍄','#7a4fa3'),tile(650,577,'🍄','#7a4fa3'),tile(88,185,'🍄','#7a4fa3'),tile(60,530,'🍄','#7a4fa3'),tile(830,430,'👻','#b0507a'),tile(480,205,'🃏','#2d4a7a'),tile(275,540,'⏰','#a8472b')].join('');
+const send=a=>fetch(`/act?room=${room}&id=${pid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(a)}).then(r=>{ERR=r.ok?'':' (that move wasn’t allowed)';if(!r.ok)ui()}).catch(()=>{ERR=' ⚠ connection problem';ui()});
+const me=()=>S&&S.you>=0?S.seats[S.you]:null,myTurn=()=>S&&S.phase==='play'&&S.you===S.turn;
+const nameOf=i=>{const s=S.seats[i],c=CHARACTERS.find(x=>x.id===s.char);return c.emoji+' '+s.name};
+function drawBoard(){const g=[DECOR],done=new Set();
+ Object.keys(adj).forEach(a=>adj[a].forEach(b=>{const k=[a,b].sort().join('|');if(done.has(k))return;done.add(k);const A=nodes[a],B=nodes[b];g.push(`<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="#cfd6e4" stroke-width="22" stroke-linecap="round"/>`)}));
+ Object.values(nodes).forEach(n=>{g.push(`<circle cx="${n.x}" cy="${n.y}" r="17" fill="${COL[n.t]}" stroke="#fff" stroke-width="3"/>`);const t=n.t==='blue'?'+3':n.t==='red'?'−3':ICO[n.t];g.push(`<text x="${n.x}" y="${n.y+5}" text-anchor="middle" font-size="${n.t==='item'||n.t==='start'?14:12}" fill="#fff" font-weight="700">${t}</text>`)});
+ g.push('<g id="star"></g><g id="tokens"></g>');$('svg').innerHTML=g.join('')}
+function tokens(){if(!S)return;const el=$('tokens'),st=$('star'),sn=nodes[S.starAt];
+ st.innerHTML=S.phase==='play'?`<text x="${sn.x}" y="${sn.y-26}" text-anchor="middle" font-size="34">⭐</text>`:'';
+ const by={};S.seats.forEach((s,i)=>{const pos=shown[i]||s.pos;(by[pos]=by[pos]||[]).push(i)});let h='';
+ Object.entries(by).forEach(([pos,ids])=>ids.forEach((i,k)=>{const n=nodes[pos],c=CHARACTERS.find(x=>x.id===S.seats[i].char),ox=(k-(ids.length-1)/2)*18,on=i===S.turn&&S.phase==='play';
+  h+=`<g class="tok" transform="translate(${n.x+ox},${n.y-4})"><circle r="14" fill="${c.color}" stroke="${on?'#ffd23f':'#fff'}" stroke-width="${on?5:3}"/><text y="7" text-anchor="middle" font-size="18">${c.emoji}</text></g>`}));
+ if(S.pending&&S.pending.type==='fork'&&myTurn())h+=S.pending.opts.map(o=>{const n=nodes[o];return`<circle cx="${n.x}" cy="${n.y}" r="25" fill="rgba(255,210,63,.2)" stroke="#ffd23f" stroke-width="4" stroke-dasharray="6 4" style="cursor:pointer" data-a="go" data-v="${o}"/>`}).join('');
+ el.innerHTML=h}
+function ui(){if(!S)return;const m=me();let st='',ct='';
+ if(S.phase==='lobby'){st='Lobby – '+S.seats.length+'/4 players';
+  ct=`<input id="nm" maxlength="16" placeholder="Your name" value="${myName.replace(/"/g,'')}" style="margin-bottom:8px"><div style="margin-bottom:6px">Pick your character:</div><div class="row">`+CHARACTERS.map(c=>{const t=S.seats.some(s=>s.char===c.id&&(!m||m.char!==c.id)),sel=m&&m.char===c.id;return`<button class="chip ${sel?'sel':''} ${t?'taken':''}" ${t?'disabled':''} data-a="join" data-v="${c.id}">${c.emoji} ${c.name}<br><small>${c.perk}</small></button>`}).join('')+'</div><div class="row" style="margin-top:10px">'+
+  (m?'<button class="alt" data-a="leave">Leave</button>':'')+(S.seats.length>=2&&S.you===0?`<button data-a="start">Start game (${S.seats.length} players)</button>`:'')+'</div>'+(S.you===0?'':'<small>The first player to join starts the game (2–4 players).</small>')}
+ else if(S.phase==='over'){const w=[...S.seats.keys()].sort((a,b)=>S.seats[b].stars-S.seats[a].stars||S.seats[b].coins-S.seats[a].coins);st='🏆 '+nameOf(w[0])+' wins!';ct=S.you===0?'<button data-a="reset">Back to lobby</button>':''}
+ else{const cur=S.seats[S.turn],p=S.pending;st='Round '+S.round+'/'+SETTINGS.maxRounds+' – '+nameOf(S.turn)+'’s turn'+(myTurn()?' (you)':'');
+  if(myTurn()){if(!p){ct='<button data-a="roll">🎲 Roll the dice</button>'+(cur.bonus||cur.dbl?`<div style="margin-top:6px"><small>Boosted: ${cur.dbl?'two dice ':''}${cur.bonus?'+'+cur.bonus:''}</small></div>`:'');
+    if(cur.items.length)ct+='<div style="margin-top:10px">Your items:</div><div class="row">'+cur.items.map((id,k)=>{const it=ITEMS.find(x=>x.id===id);return`<button class="chip" data-a="item" data-v="${k}">${it.emoji} ${it.name}<br><small>${it.desc}</small></button>`}).join('')+'</div>'}
+   else if(p.type==='fork')ct='Pick a path: tap a glowing space on the board.';
+   else ct=`<div>Buy a ⭐ for ${SETTINGS.starCost} coins?</div><div class="row" style="margin-top:6px"><button data-a="star" data-v="1">Buy ⭐</button><button class="alt" data-a="star" data-v="0">Skip</button></div>`}
+  else ct='<small>Waiting for '+nameOf(S.turn)+'…'+(!m?' (you’re spectating)':'')+'</small>'}
+ $('status').textContent=st+ERR;$('inv').innerHTML=room==='main'?'':'Room: '+room;
+ const keep=document.activeElement&&document.activeElement.id==='nm';if(!(keep&&S.phase==='lobby'&&$('nm')))$('ctl').innerHTML=ct;
+ $('players').innerHTML=S.seats.map((s,k)=>{const c=CHARACTERS.find(x=>x.id===s.char);return`<div class="pl ${S.phase==='play'&&k===S.turn?'on':''}"><span class="em">${c.emoji}</span><div style="flex:1"><b>${s.name}</b>${k===S.you?' (you)':''}<br><small>${s.items.map(id=>ITEMS.find(x=>x.id===id).emoji).join(' ')||'no items'}</small></div><div class="big">⭐${s.stars} 🪙${s.coins}</div></div>`}).join('')||'<small>No players yet</small>';
+ $('log').innerHTML=S.log.map(l=>'<div>'+l.replace(/</g,'&lt;')+'</div>').join('');tokens()}
+async function onState(next){const was=S;S=next;
+ if(was&&next.seq>lastSeq&&next.trail&&next.trail.length&&was.seats.length===next.seats.length&&was.phase==='play'){const mv=next.seats.findIndex((s,k)=>was.seats[k].pos!==s.pos);
+  if(mv>=0){ui();for(const n of next.trail){shown[mv]=n;tokens();await new Promise(r=>setTimeout(r,260))}delete shown[mv]}}
+ lastSeq=next.seq;ui()}
+document.addEventListener('input',e=>{if(e.target.id==='nm'){myName=e.target.value;localStorage.setItem('pname',myName)}});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b||b.disabled)return;const a=b.dataset.a,v=b.dataset.v;
+ if(a==='join')send({type:'join',char:v,name:myName});else if(a==='star')send({type:'star',buy:v==='1'});else if(a==='item')send({type:'item',k:+v});else if(a==='go')send({type:'choose',node:v});else send({type:a})});
+drawBoard();
+const es=new EventSource(`/events?room=${room}&id=${pid}`);
+es.onmessage=e=>onState(JSON.parse(e.data));es.onerror=()=>{$('status').textContent='Reconnecting…'};
+</script></body></html>
